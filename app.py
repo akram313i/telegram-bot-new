@@ -4,6 +4,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
 import os
+import asyncio
 
 app = Flask(__name__)
 
@@ -35,15 +36,25 @@ async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def run_bot():
     try:
+        # إنشاء التطبيق
         bot_app = Application.builder().token(TOKEN).build()
+        
+        # إضافة المعالجات
         bot_app.add_handler(CommandHandler("start", start))
         bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, video))
+        
         print("✅ البوت يعمل...")
+        
+        # تشغيل البوت بطريقة صحيحة للإصدارات الجديدة
         bot_app.run_polling()
+        
     except Exception as e:
         print(f"❌ فشل تشغيل البوت: {e}")
 
 if __name__ == '__main__':
+    # تشغيل البوت في خيط منفصل
     Thread(target=run_bot).start()
+    
+    # تشغيل خادم Flask
     port = int(os.environ.get('PORT', 10000))
     app.run(host='0.0.0.0', port=port, debug=False)
