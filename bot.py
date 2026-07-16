@@ -11,6 +11,9 @@ if not TOKEN:
 
 bot = telebot.TeleBot(TOKEN)
 
+# 🔥 حذف الـ Webhook قبل أي شيء
+bot.remove_webhook()
+
 DOWNLOAD_FOLDER = "downloads"
 if not os.path.exists(DOWNLOAD_FOLDER):
     os.makedirs(DOWNLOAD_FOLDER)
