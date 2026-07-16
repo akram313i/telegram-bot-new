@@ -1,55 +1,95 @@
-from flask import Flask
-from threading import Thread
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import telebot
 import yt_dlp
 import os
+import re
+import time
+import threading
 
-app = Flask(__name__)
-
-@app.route('/')
-def index():
-    return "✅ البوت شغال!"
-
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-
+TOKEN = os.environ.get("BOT_TOKEN")
 if not TOKEN:
-    print("❌ خطأ: لم يتم العثور على TELEGRAM_TOKEN")
-    exit(1)
+    raise Exception("BOT_TOKEN not found!")
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🎬 أهلاً! أرسل رابط فيديو للتحميل.")
+bot = telebot.TeleBot(TOKEN)
 
-async def video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    url = update.message.text
-    await update.message.reply_text("⏳ جاري التحميل...")
-    try:
-        ydl_opts = {"format": "best[ext=mp4]", "outtmpl": "video.%(ext)s", "quiet": True}
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file = ydl.prepare_filename(info)
-            await update.message.reply_video(open(file, "rb"))
-            os.remove(file)
-    except Exception as e:
-        await update.message.reply_text(f"❌ فشل التحميل: {str(e)}")
+DOWNLOAD_FOLDER = "downloads"
+if not os.path.exists(DOWNLOAD_FOLDER):
+    os.makedirs(DOWNLOAD_FOLDER)
 
-# تشغيل البوت بطريقة مبسطة
-def run_bot():
-    try:
-        bot_app = Application.builder().token(TOKEN).build()
-        bot_app.add_handler(CommandHandler("start", start))
-        bot_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, video))
-        print("✅ البوت يعمل...")
-        bot_app.run_polling()
-    except Exception as e:
-        print(f"❌ فشل تشغيل البوت: {e}")
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    user_name = message.from_user.first_name
+    welcome_text = f"""
+🎬 **مرحباً بك في بوت اكرم!**
 
-if __name__ == '__main__':
-    # تشغيل البوت في خلفية
-    thread = Thread(target=run_bot)
-    thread.daemon = True
-    thread.start()
+👤 أهلاً بك يا {user_name}!
+
+📥 أرسل الرابط وسأحمله لك.
+
+✅ يدعم جميع المواقع.
+
+🔥 يعمل على Render.com 24/7
+"""
+    bot.reply_to(message, welcome_text)
+
+@bot.message_handler(func=lambda message: True)
+def download_media(message):
+    url = message.text.strip()
     
-    # تشغيل Flask
-    port = int(os.environ.get('PORT', 10000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    if not re.match(r'^https?://', url):
+        bot.reply_to(message, "❌ أرسل رابطاً صحيحاً")
+        return
+    
+    status_msg = bot.reply_to(message, "⏳ جاري التحميل...")
+    
+    def process_download():
+        try:
+            ydl_opts = {
+                'format': 'best[ext=mp4]/best[ext=jpg]/best[ext=png]/best',
+                'outtmpl': f'{DOWNLOAD_FOLDER}/%(title)s.%(ext)s',
+                'quiet': True,
+                'no_warnings': True,
+                'ignoreerrors': True,
+                'extract_flat': False,
+                'socket_timeout': 30,
+                'retries': 5,
+            }
+            
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                file_path = ydl.prepare_filename(info)
+                
+                if not os.path.exists(file_path):
+                    files = os.listdir(DOWNLOAD_FOLDER)
+                    if files:
+                        file_path = os.path.join(DOWNLOAD_FOLDER, files[0])
+                    else:
+                        raise Exception("لم يتم العثور على الملف")
+                
+                file_size = os.path.getsize(file_path) / (1024 * 1024)
+                
+                bot.edit_message_text(
+                    f"✅ تم التحميل!\n📁 {os.path.basename(file_path)}\n📦 {file_size:.2f} MB",
+                    chat_id=message.chat.id,
+                    message_id=status_msg.message_id
+                )
+                
+                with open(file_path, 'rb') as f:
+                    bot.send_document(message.chat.id, f)
+                
+                os.remove(file_path)
+                print(f"✅ تم تحميل: {os.path.basename(file_path)}")
+                
+        except Exception as e:
+            error_msg = str(e)
+            print(f"❌ خطأ: {error_msg}")
+            bot.edit_message_text(
+                f"❌ خطأ في التحميل\n{error_msg[:100]}",
+                chat_id=message.chat.id,
+                message_id=status_msg.message_id
+            )
+    
+    threading.Thread(target=process_download).start()
+
+if __name__ == "__main__":
+    print("✅ بوت اكرم يعمل على Render.com...")
+    bot.infinity_polling()
